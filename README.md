@@ -49,15 +49,16 @@ SPOTIFY_PLAYLIST_ID=your-spotify-playlist-id # optional, you can provide it as a
 
 ## Running the Script
 
-To run Genre-Scrapper, use this command:
+Examples:
 
 ```bash
 npm start
-# or yarn start
+yarn start
 
-# If you want to provide the playlist id as an argument
-npm start -- 76yxaCsawHQZuuVQgSGlvG
-# or yarn start 76yxaCsawHQZuuVQgSGlvG
+npm start -- https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
+yarn start https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
+
+yarn start 76yxaCsawHQZuuVQgSGlvG
 ```
 
 This will start the script, and it will print the count of genres in the specified Spotify playlist to the console.

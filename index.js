@@ -94,19 +94,34 @@ async function countGenres(playlistId) {
   }
 }
 
+function extractPlaylistId(input) {
+  const spotifyUrlRegex =
+    /https:\/\/open\.spotify\.com\/playlist\/([\w\d]+)(\?si=.+)?/;
+  const matches = input.match(spotifyUrlRegex);
+  return matches ? matches[1] : null;
+}
+
+function getPlaylistIdFromArgs(args) {
+  if (args.length === 0) {
+    return null;
+  }
+
+  const input = args[0];
+  if (input.startsWith("https://")) {
+    return extractPlaylistId(input);
+  }
+
+  return input;
+}
+
 async function main() {
   const args = process.argv.slice(2);
-  let playlistId;
-
-  if (args.length > 0) {
-    playlistId = args[0];
-  } else {
-    playlistId = process.env.SPOTIFY_PLAYLIST_ID;
-  }
+  const playlistId =
+    getPlaylistIdFromArgs(args) || process.env.SPOTIFY_PLAYLIST_ID;
 
   if (!playlistId) {
     console.error(
-      "Please provide the playlist ID as a command line argument or set SPOTIFY_PLAYLIST_ID environment variable."
+      "Please provide the playlist ID or URL as a command line argument or set SPOTIFY_PLAYLIST_ID environment variable."
     );
     process.exit(1);
   }
