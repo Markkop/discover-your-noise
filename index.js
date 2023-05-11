@@ -52,7 +52,7 @@ async function analyzePlaylistGenres(playlistId) {
       return genres;
     }
 
-    async function getPlaylistArtists(playlistId) {
+    async function getPlaylistArtists(playlistId, spotifyApi) {
       const { body } = await spotifyApi.getPlaylist(playlistId);
       return [
         ...new Set(
@@ -60,6 +60,7 @@ async function analyzePlaylistGenres(playlistId) {
         ),
       ];
     }
+    const artists = await getPlaylistArtists(playlistId, spotifyApi);
     const artists = await getPlaylistArtists(playlistId);
 
     if (!artists || artists.length === 0) {
