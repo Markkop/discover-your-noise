@@ -9,10 +9,12 @@ const spotifyApi = new SpotifyWebApi({
   redirectUri: process.env.SPOTIFY_REDIRECT_URI,
   accessToken: process.env.SPOTIFY_ACCESS_TOKEN,
 });
+
 const getGenres = async (browser, artist) => {
   const page = await browser.newPage();
-  const url =
-    "https://everynoise.com/lookup.cgi?who=" + encodeURIComponent(artist);
+  const url = `https://everynoise.com/lookup.cgi?who=${encodeURIComponent(
+    artist
+  )}`;
   await page.goto(url);
   const genres = await page.evaluate(() => {
     const anchorTags = document.querySelectorAll("div>a:not([title])");
@@ -23,29 +25,33 @@ const getGenres = async (browser, artist) => {
 };
 
 const getPlaylistArtists = async (playlistId) => {
-  const data = await spotifyApi.getPlaylist(playlistId);
-  const tracks = data.body.tracks.items;
-  const artists = tracks.map((track) => track.track.artists[0].name);
-  return [...new Set(artists)];
+  const { body } = await spotifyApi.getPlaylist(playlistId);
+  return [
+    ...new Set(body.tracks.items.map((track) => track.track.artists[0].name)),
+  ];
 };
 
 const countGenres = async (playlistId) => {
   const artists = await getPlaylistArtists(playlistId);
+
+  if (!artists || artists.length === 0) {
+    console.log("No artists found in the playlist.");
+    return;
+  }
+
   const browser = await puppeteer.launch();
 
   let genresCount = {};
+
   for (const artist of artists) {
     const genres = await getGenres(browser, artist);
     console.log(`Genres for ${artist}: ${genres}`);
 
     for (const genre of genres) {
-      if (genre in genresCount) {
-        genresCount[genre]++;
-      } else {
-        genresCount[genre] = 1;
-      }
+      genresCount[genre] = (genresCount[genre] || 0) + 1;
     }
   }
+
   await browser.close();
 
   const sortedGenresCount = Object.entries(genresCount).sort(
@@ -56,6 +62,11 @@ const countGenres = async (playlistId) => {
   return sortedGenresCount;
 };
 
-countGenres(process.env.SPOTIFY_PLAYLIST_ID)
-  .then(console.log)
-  .catch(console.error);
+const playlistId = process.env.SPOTIFY_PLAYLIST_ID;
+
+if (!playlistId) {
+  console.error("SPOTIFY_PLAYLIST_ID environment variable is not set.");
+  process.exit(1);
+}
+
+countGenres(playlistId).then(console.log).catch(console.error);
