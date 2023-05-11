@@ -15,7 +15,7 @@ To install Genre-Scrapper, follow these steps:
 
 ```bash
 git clone git@github.com:Markkop/discover-your-noise.git
-cd genre-scrapper
+cd discover-your-noise
 npm install # or yarn install
 ```
 
@@ -26,10 +26,7 @@ In order to use this script, you will need a Spotify Client ID, Client Secret, a
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/login).
 2. Log in to your Spotify account.
 3. Click on 'Create an App', fill out the form, and click 'Create'.
-4. Now you are in your application's dashboard, you can see your Client ID and Client Secret. Copy them somewhere safe.
-5. To get an access token, make this POST request: https://developer.spotify.com/documentation/web-api/tutorials/getting-started#request-an-access-token
-
-**Note:** Access tokens expire after a certain period of time, so you may need to refresh it if your script stops working.
+4. Now you are in your application's dashboard, you can see your Client ID and Client Secret
 
 ## Obtaining Spotify Playlist ID
 
