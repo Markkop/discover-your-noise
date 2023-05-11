@@ -95,10 +95,19 @@ async function countGenres(playlistId) {
 }
 
 async function main() {
-  const playlistId = process.env.SPOTIFY_PLAYLIST_ID;
+  const args = process.argv.slice(2);
+  let playlistId;
+
+  if (args.length > 0) {
+    playlistId = args[0];
+  } else {
+    playlistId = process.env.SPOTIFY_PLAYLIST_ID;
+  }
 
   if (!playlistId) {
-    console.error("SPOTIFY_PLAYLIST_ID environment variable is not set.");
+    console.error(
+      "Please provide the playlist ID as a command line argument or set SPOTIFY_PLAYLIST_ID environment variable."
+    );
     process.exit(1);
   }
 
