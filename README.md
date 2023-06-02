@@ -1,5 +1,8 @@
 # 🎧 Discover Your Noise
 
+![image](https://github.com/Markkop/discover-your-noise/assets/16388408/58180733-1e14-4c7e-b1a2-b4ce3ac52345)
+
+
 This is a simple Node.js script that counts the genres of songs in a Spotify playlist. The script uses the Spotify Web API to get the playlist's artists, and then it uses Puppeteer to scrape the genres of each artist from everynoise.com.
 
 ## Prerequisites
@@ -49,15 +52,28 @@ SPOTIFY_PLAYLIST_ID=your-spotify-playlist-id # optional, you can provide it as a
 
 ## Running the Script
 
+You may now copy and paste the playlist share URL
+
+![image](https://github.com/Markkop/discover-your-noise/assets/16388408/b525d7b1-f0f1-4708-93d4-ce4d32924bb2)
+
+And run the script like:
+
+```bash
+yarn start https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
+```
+
 Examples:
 
 ```bash
+# uses ID from .env
 npm start
 yarn start
 
+# uses ID from share url
 npm start -- https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
 yarn start https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
 
+# uses ID from argument
 yarn start 76yxaCsawHQZuuVQgSGlvG
 ```
 
