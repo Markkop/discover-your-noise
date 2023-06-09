@@ -28,7 +28,7 @@ async function getAccessToken() {
   }
 }
 
-async function countGenres(playlistId) {
+async function analyzePlaylistGenres(playlistId) {
   try {
     const accessToken = await getAccessToken();
     const spotifyApi = new SpotifyWebApi({
@@ -38,7 +38,7 @@ async function countGenres(playlistId) {
       accessToken,
     });
 
-    const getGenres = async (browser, artist) => {
+    async function getGenres(browser, artist) {
       const page = await browser.newPage();
       const url = `https://everynoise.com/lookup.cgi?who=${encodeURIComponent(
         artist
@@ -50,16 +50,17 @@ async function countGenres(playlistId) {
       });
       await page.close();
       return genres;
-    };
+    }
 
-    const getPlaylistArtists = async (playlistId) => {
+    async function getPlaylistArtists(playlistId, spotifyApi) {
       const { body } = await spotifyApi.getPlaylist(playlistId);
       return [
         ...new Set(
           body.tracks.items.map((track) => track.track.artists[0].name)
         ),
       ];
-    };
+    }
+    const artists = await getPlaylistArtists(playlistId, spotifyApi);
     const artists = await getPlaylistArtists(playlistId);
 
     if (!artists || artists.length === 0) {
