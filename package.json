@@ -1,19 +1,32 @@
 {
-  "name": "genre-scrapper",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "name": "discover-your-noise",
+  "version": "2.0.0",
+  "description": "Discover the genres represented in a Spotify playlist — CLI, agent skill, and web app.",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "bin": {
+    "discover-your-noise": ".agents/skills/discover-your-noise/scripts/discover-your-noise.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "axios": "^1.4.0",
-    "dotenv": "^16.0.3",
-    "puppeteer": "^20.1.2",
-    "spotify-web-api-node": "^5.0.2"
-  }
+  "scripts": {
+    "start": "node .agents/skills/discover-your-noise/scripts/discover-your-noise.mjs",
+    "test": "node --test",
+    "dev": "npm run dev:server",
+    "dev:server": "npm run dev -w @discover-your-noise/server",
+    "dev:web": "npm run dev -w @discover-your-noise/web"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "agent-skill",
+    "spotify",
+    "genres",
+    "everynoise"
+  ],
+  "author": "Mark Kop",
+  "license": "ISC"
 }

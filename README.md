@@ -1,138 +1,43 @@
-# 🎧 Discover Your Noise
+# Discover Your Noise
 
-![image](https://github.com/Markkop/discover-your-noise/assets/16388408/58180733-1e14-4c7e-b1a2-b4ce3ac52345)
+Discover the genres represented in a Spotify playlist. The project is both a
+zero-dependency Node.js command and a portable agent skill for Codex, Cursor,
+Claude Code, and DeepSeek Harness.
 
+The first runnable version supports public playlists. It does not require a
+Spotify API key. For playlists longer than Spotify's public HTML snapshot, the
+skill detects the incomplete result and guides a browser-capable agent through
+collecting the remaining tracks.
 
-This is a simple Node.js script that counts the genres of songs in a Spotify playlist. The script uses the Spotify Web API to get the playlist's artists, and then it uses Puppeteer to scrape the genres of each artist from everynoise.com.
+## Try it
 
-## Prerequisites
-
-Before you begin, ensure you have met the following requirements:
-
-- You have installed Node.js and npm.
-- You have a Spotify account.
-
-## Installation
-
-To install Genre-Scrapper, follow these steps:
+Requires Node.js 20 or newer.
 
 ```bash
-git clone git@github.com:Markkop/discover-your-noise.git
-cd discover-your-noise
-npm install # or yarn install
-```
-
-## Obtaining Spotify API Keys
-
-In order to use this script, you will need a Spotify Client ID, Client Secret, and an access token. Here's how you get them:
-
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/login).
-2. Log in to your Spotify account.
-3. Click on 'Create an App', fill out the form, and click 'Create'.
-4. Now you are in your application's dashboard, you can see your Client ID and Client Secret
-
-## Obtaining Spotify Playlist ID
-
-1. Open the Spotify app (desktop or web version) and navigate to the desired playlist.
-2. Click on the three-dot menu next to the "PLAY" button.
-3. Select "Share" from the drop-down menu, then click on "Copy Playlist Link". This will copy a URL to your clipboard.
-4. The URL you copied should look something like this: `https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=12345abc6789`. The Playlist ID is the alphanumeric string after `/playlist/` and before the `?`. In this case, `37i9dQZF1DXcBWIGoYBM5M` is the Playlist ID.
-
-## Setting Up Environment Variables
-
-Copy `.env.example`, rename it to `.env` and insert your keys and tokens like this:
-
-```bash
-SPOTIFY_CLIENT_ID=your-spotify-client-id
-SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIFY_REDIRECT_URI=your-app-redirect-uri
-SPOTIFY_ACCESS_TOKEN=your-spotify-access-token
-SPOTIFY_PLAYLIST_ID=your-spotify-playlist-id # optional, you can provide it as an argument
-```
-
-## Running the Script
-
-You may now copy and paste the playlist share URL
-
-![image](https://github.com/Markkop/discover-your-noise/assets/16388408/b525d7b1-f0f1-4708-93d4-ce4d32924bb2)
-
-And run the script like:
-
-```bash
-yarn start https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
-```
-
-Examples:
-
-```bash
-# uses ID from .env
-npm start
-yarn start
-
-# uses ID from share url
 npm start -- https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
-yarn start https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
-
-# uses ID from argument
-yarn start 76yxaCsawHQZuuVQgSGlvG
 ```
 
-This will start the script, and it will print the count of genres in the specified Spotify playlist to the console.
+The report distinguishes direct Every Noise classifications, genres inferred
+from related artists, and artists that remain unmapped.
 
-## Example
+## Use it as a skill
 
-From this playlist:
-https://open.spotify.com/playlist/76yxaCsawHQZuuVQgSGlvG
+The canonical skill lives at
+`.agents/skills/discover-your-noise/SKILL.md`, which is discovered directly by
+Cursor, Codex, and DeepSeek Harness when this repository is open.
 
-Output:
+For Claude Code, copy the skill directory into the project skill location:
 
-```js
-[
-  ["downtempo", 3],
-  ["glitch hop", 2],
-  ["hip-hop experimental", 2],
-  ["downtempo fusion", 2],
-  ["glitch", 2],
-  ["electronica", 2],
-  ["psychill", 2],
-  ["ambient psychill", 2],
-  ["glitch beats", 1],
-  ["livetronica", 1],
-  ["compositional ambient", 1],
-  ["neo-classical", 1],
-  ["chillhop", 1],
-  ["bass trip", 1],
-  ["abstract beats", 1],
-  ["jazz boom bap", 1],
-  ["nu skool breaks", 1],
-  ["classic progressive house", 1],
-  ["breakbeat", 1],
-  ["jazz rap", 1],
-  ["ambeat", 1],
-  ["abstract hip hop", 1],
-  ["german indie pop", 1],
-  ["cologne indie", 1],
-  ["neo-kraut", 1],
-  ["abstract", 1],
-  ["intelligent dance music", 1],
-  ["instrumental hip hop", 1],
-  ["trap beats", 1],
-  ["chillsynth", 1],
-  ["ambient", 1],
-  ["synthwave", 1],
-  ["montreal indie", 1],
-  ["relaxative", 1],
-  ["focus", 1],
-  ["atmosphere", 1],
-  ["indietronica", 1],
-  ["asheville indie", 1],
-  ["uk alternative pop", 1],
-  ["collage pop", 1],
-  ["future ambient", 1],
-  ["ambient fusion", 1],
-  ["ambient trance", 1],
-  ["chill lounge", 1],
-  ["german electronica", 1],
-  ["new french touch", 1],
-];
+```bash
+mkdir -p .claude/skills
+cp -R .agents/skills/discover-your-noise .claude/skills/
 ```
+
+Then ask your agent to discover the genres in a Spotify playlist and provide
+the playlist URL.
+
+## Current boundary
+
+Private playlists and saved-library analysis require Spotify user OAuth. That
+flow is intentionally not part of the first trial and will be added after the
+public/browser workflow is exercised with real playlists.

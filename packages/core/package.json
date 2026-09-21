@@ -1,0 +1,9 @@
+{
+  "name": "@discover-your-noise/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  }
+}
