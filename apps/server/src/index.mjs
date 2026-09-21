@@ -14,7 +14,7 @@ import {
   analyzeTrack,
 } from "./analyze-route.mjs";
 import { streamAnalyze, wantsStream } from "./analyze-stream.mjs";
-import { withCache } from "./cache.mjs";
+import { deleteCache, withCache } from "./cache.mjs";
 import {
   fetchLikedTracksPage,
   fetchRecentlyPlayedPage,
@@ -212,7 +212,14 @@ app.post("/api/auth/logout", (c) => {
   return c.json({ ok: true });
 });
 
+function wantsCacheRefresh(body) {
+  return body?.refresh === true || body?.refresh === "true";
+}
+
 async function handleAnalyze(c, { cacheKey, body, run }) {
+  if (wantsCacheRefresh(body) && cacheKey) {
+    deleteCache(cacheKey);
+  }
   if (wantsStream(body, c.req.header("accept"))) {
     return streamAnalyze(async (onProgress) => {
       if (cacheKey) return withCache(cacheKey, run, onProgress);

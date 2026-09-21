@@ -737,7 +737,11 @@ function renderReportPanel() {
         <span>${report.directArtists.length} direct (${pct(report.directArtists.length, total)})</span>
         <span>${report.inferredArtists.length} inferred (${pct(report.inferredArtists.length, total)})</span>
         <span>${report.unmappedArtists.length} unmapped (${pct(report.unmappedArtists.length, total)})</span>
-        ${state.reportCached ? `<span class="cache-tag">cached</span>` : ""}
+        ${
+          state.reportCached
+            ? `<button type="button" class="cache-tag" id="refresh-cached-analysis" title="Clear cache and analyze again">cached</button>`
+            : ""
+        }
       </div>
 
       <div class="report-split">
@@ -1004,11 +1008,12 @@ async function analyzeStream(path, body = {}) {
   return result;
 }
 
-async function runAnalysis(label, path, body = {}, { restore = false } = {}) {
-  state.analyzeContext = { path, body, label };
+async function runAnalysis(label, path, body = {}, { restore = false, refresh = false } = {}) {
+  const { refresh: _drop, ...persistBody } = body ?? {};
+  state.analyzeContext = { path, body: persistBody, label };
   state.loading = true;
-  state.loadingLabel = label;
-  state.progress = { pct: 0, message: label };
+  state.loadingLabel = refresh ? "Refreshing analysis…" : label;
+  state.progress = { pct: 0, message: refresh ? "Refreshing analysis…" : label };
   state.error = null;
   state.authRequired = null;
   state.report = null;
@@ -1016,7 +1021,7 @@ async function runAnalysis(label, path, body = {}, { restore = false } = {}) {
   state.selectedGenre = null;
   render();
   try {
-    const result = await analyzeStream(path, body);
+    const result = await analyzeStream(path, { ...persistBody, ...(refresh ? { refresh: true } : {}) });
     if (result.status === "auth_required") {
       state.authRequired = result.message;
     } else if (result.status === "ok") {
@@ -1044,6 +1049,12 @@ async function restoreAnalysis() {
   if (!state.analyzeContext) return;
   const { label, path, body } = state.analyzeContext;
   await runAnalysis(label, path, body ?? {}, { restore: true });
+}
+
+async function onRefreshCachedAnalysis() {
+  if (!state.analyzeContext || state.loading || !state.reportCached) return;
+  const { label, path, body } = state.analyzeContext;
+  await runAnalysis(label, path, body ?? {}, { restore: true, refresh: true });
 }
 
 async function onAnalyzeUrl() {
@@ -1156,6 +1167,7 @@ function bindEvents() {
     render();
     syncUrl({ history: "push" });
   });
+  document.getElementById("refresh-cached-analysis")?.addEventListener("click", onRefreshCachedAnalysis);
 
   document.getElementById("search-input")?.addEventListener("input", (event) => {
     state.searchQuery = event.target.value;

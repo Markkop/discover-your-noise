@@ -20,6 +20,10 @@ export function setCache(key, value, ttlMs = DEFAULT_TTL_MS) {
   store.set(key, { value, expiresAt: Date.now() + ttlMs });
 }
 
+export function deleteCache(key) {
+  return store.delete(key);
+}
+
 export async function withCache(key, fn, onProgress) {
   const cached = getCache(key);
   if (cached) {
