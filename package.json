@@ -16,7 +16,8 @@
     "test": "node --test",
     "dev": "npm run dev:server",
     "dev:server": "npm run dev -w @discover-your-noise/server",
-    "dev:web": "npm run dev -w @discover-your-noise/web"
+    "dev:web": "npm run dev -w @discover-your-noise/web",
+    "build:web": "npm run build -w @discover-your-noise/web"
   },
   "engines": {
     "node": ">=20"

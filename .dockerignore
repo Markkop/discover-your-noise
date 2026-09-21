@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+!**/.env.example
+!**/.env.prod.example
+**/node_modules
+**/dist
+**/.vite
+**/*.log
+apps/web
+.agents
+.github

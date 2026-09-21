@@ -45,7 +45,21 @@ const app = new Hono();
 const FE_ORIGIN = process.env.FE_ORIGIN ?? "http://127.0.0.1:5173";
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? "127.0.0.1";
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN ?? undefined;
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const COOKIE_NAME = getSessionCookieName();
+
+function sessionCookieOptions() {
+  const options = {
+    path: "/",
+    httpOnly: true,
+    sameSite: "Lax",
+    maxAge: 86400,
+  };
+  if (IS_PRODUCTION) options.secure = true;
+  if (COOKIE_DOMAIN) options.domain = COOKIE_DOMAIN;
+  return options;
+}
 
 function isAllowedOrigin(origin) {
   if (!origin) return true;
@@ -98,16 +112,11 @@ app.use(
 );
 
 function writeSessionCookie(c, sessionId) {
-  setCookie(c, COOKIE_NAME, sessionId, {
-    path: "/",
-    httpOnly: true,
-    sameSite: "Lax",
-    maxAge: 86400,
-  });
+  setCookie(c, COOKIE_NAME, sessionId, sessionCookieOptions());
 }
 
 function eraseSessionCookie(c) {
-  deleteCookie(c, COOKIE_NAME, { path: "/" });
+  deleteCookie(c, COOKIE_NAME, sessionCookieOptions());
 }
 
 async function ensureAccessToken(sessionId) {
