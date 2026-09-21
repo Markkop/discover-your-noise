@@ -509,7 +509,14 @@ export async function analyzeFromTracks(playlist, tracks, fetchImpl = fetch, opt
   if (artists.length === 0) {
     throw new Error("No valid artists found in track data.");
   }
-  return analyzeArtists(playlist, artists, fetchImpl, options);
+  const classifications = await classifyArtists(artists, fetchImpl, options);
+  const genreByArtistId = new Map(
+    classifications.map((artist) => [artist.id, artist.genres ?? []]),
+  );
+  return {
+    ...buildReportData(playlist, classifications),
+    tracks: trackRowsForReport(tracks, genreByArtistId),
+  };
 }
 
 export async function fetchTrackArtists(trackId, accessToken, fetchImpl = fetch) {
@@ -557,19 +564,60 @@ export async function spotifyPaginate(accessToken, initialPath, fetchImpl = fetc
   return items;
 }
 
+function trackArtistEntries(track) {
+  return (track.artists ?? [])
+    .filter((a) => a?.id)
+    .map((a) => ({ id: a.id, name: a.name ?? a.id }));
+}
+
 export function tracksFromSpotifyItems(items) {
   const tracks = [];
   for (const item of items) {
     const track = item?.track ?? item;
     if (!track?.id) continue;
+    const artists = trackArtistEntries(track);
     tracks.push({
       id: track.id,
-      artists: (track.artists ?? [])
-        .filter((a) => a?.id)
-        .map((a) => ({ id: a.id, name: a.name ?? a.id })),
+      name: track.name ?? "Unknown track",
+      url: track.external_urls?.spotify ?? `https://open.spotify.com/track/${track.id}`,
+      image: imageFromSpotify(track.album?.images),
+      album: track.album?.name ?? "",
+      durationMs: track.duration_ms ?? null,
+      artists,
     });
   }
   return tracks;
+}
+
+function genresForTrackArtists(artistEntries, genreByArtistId) {
+  const genres = new Set();
+  for (const artist of artistEntries) {
+    for (const genre of genreByArtistId.get(artist.id) ?? []) {
+      genres.add(genre);
+    }
+  }
+  return [...genres].sort((left, right) => left.localeCompare(right));
+}
+
+function trackRowsForReport(tracks, genreByArtistId) {
+  return tracks.map((track) => {
+    const artistEntries = Array.isArray(track.artists) ? track.artists : [];
+    const artistsLabel =
+      artistEntries
+        .map((artist) => artist.name)
+        .filter(Boolean)
+        .join(", ") || "—";
+    return {
+      id: track.id,
+      name: track.name ?? "Unknown track",
+      url: track.url ?? `https://open.spotify.com/track/${track.id}`,
+      image: track.image ?? null,
+      artists: artistsLabel,
+      album: track.album ?? "",
+      durationMs: track.duration_ms ?? track.durationMs ?? null,
+      genres: genresForTrackArtists(artistEntries, genreByArtistId),
+    };
+  });
 }
 
 export async function fetchPlaylistForAnalysis(playlistId, accessToken, fetchImpl = fetch) {

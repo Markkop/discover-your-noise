@@ -17,6 +17,8 @@ const ARTIST_A = "1CsZ0ihKPWBDUERlQt8ekr";
 const ARTIST_B = "4l8S3gH7kFBB9XcI7EtUoT";
 const TRACK_A = "3z1TYDSkZ425XidGE3go4L";
 const TRACK_B = "4LmS9HhbDrnXCK0uGQXsTw";
+const ARTIST_C = "6M2wLyN0Grw3kA3z9PHGAE";
+const ARTIST_D = "7n2wLyN0Grw3kA3z9PHGBF";
 
 test("parses Spotify playlist URLs, URIs, and IDs", () => {
   assert.equal(parsePlaylistId(PLAYLIST_ID), PLAYLIST_ID);
@@ -138,6 +140,41 @@ test("emits progress while classifying artists", async () => {
   assert.equal(result.length, 2);
   assert.ok(progress.length > 0);
   assert.equal(progress.at(-1)?.phase, "done");
+});
+
+test("analyzeFromTracks attaches per-track genres from artist classifications", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    headers: { get: () => null },
+    json: async () => ({
+      [ARTIST_C]: ["ambient"],
+      [ARTIST_D]: ["focus"],
+    }),
+  });
+
+  const { analyzeFromTracks } = await import("../packages/core/index.mjs");
+  const report = await analyzeFromTracks(
+    { title: "Test", expectedTrackCount: 2 },
+    [
+      {
+        id: TRACK_A,
+        name: "Track A",
+        artists: [{ id: ARTIST_C, name: "Artist C" }],
+      },
+      {
+        id: TRACK_B,
+        name: "Track B",
+        artists: [
+          { id: ARTIST_C, name: "Artist C" },
+          { id: ARTIST_D, name: "Artist D" },
+        ],
+      },
+    ],
+    fetchImpl,
+  );
+  assert.equal(report.tracks.length, 2);
+  assert.deepEqual(report.tracks[0].genres, ["ambient"]);
+  assert.deepEqual(report.tracks[1].genres, ["ambient", "focus"]);
 });
 
 test("counts artists and distinguishes direct from inferred genres", () => {

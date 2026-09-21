@@ -562,6 +562,17 @@ button:disabled {
   overflow: auto;
 }
 
+.report-tracks-section {
+  border-top: 1px solid var(--border);
+  padding: 0.65rem 0.5rem 0.75rem;
+}
+
+.report-tracks-section .table-wrap {
+  padding: 0;
+  max-height: 28rem;
+  overflow: auto;
+}
+
 .report-panel .genres-cell {
   line-height: 1.4;
   font-size: 0.82rem;

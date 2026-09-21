@@ -56,7 +56,7 @@ const state = {
   },
   recentBeforeByPage: [null],
   libraryLoading: false,
-  reportPage: { genres: 0, artists: 0 },
+  reportPage: { genres: 0, artists: 0, tracks: 0 },
   selectedGenre: null,
   trackGenres: {},
   searchDebounce: null,
@@ -471,7 +471,11 @@ function copyableInline(innerHtml, copyText, label = "text") {
   return `<span class="copyable-inline">${innerHtml}${copyBtn(copyText, label)}</span>`;
 }
 
-function renderGenreContent(trackId) {
+function renderGenreContent(trackId, presetGenres) {
+  if (presetGenres !== undefined) {
+    const text = presetGenres.join(", ") || "—";
+    return copyableContent(escapeHtml(text), text, "genres");
+  }
   if (!trackId) return `<span class="muted-cell">—</span>`;
   const entry = state.trackGenres[trackId];
   if (!entry) {
@@ -485,11 +489,6 @@ function renderGenreContent(trackId) {
   }
   const text = (entry.genres ?? []).join(", ") || "—";
   return copyableContent(escapeHtml(text), text, "genres");
-}
-
-function renderGenreCell(trackId) {
-  if (!trackId) return `<td class="genre-col desktop-only muted-cell">—</td>`;
-  return `<td class="genre-col desktop-only">${renderGenreContent(trackId)}</td>`;
 }
 
 function playlistSubtitle(playlist) {
@@ -531,12 +530,13 @@ function renderPlaylistRow(playlist) {
     </tr>`;
 }
 
-function renderTrackRow(track, extraCells = "") {
+function renderTrackRow(track, { presetGenres } = {}) {
   const titleInner = track.url
     ? `<a class="row-link" href="${escapeAttr(track.url)}" target="_blank" rel="noreferrer">${escapeHtml(track.name)}</a>`
     : escapeHtml(track.name);
   const album = track.album || "—";
   const subtitle = trackSubtitle(track);
+  const genrePreset = presetGenres ?? track.genres;
   return `
     <tr class="track-row">
       ${thumbCell(track.image, track.name)}
@@ -546,7 +546,7 @@ function renderTrackRow(track, extraCells = "") {
           <div class="list-meta">
             <div class="list-title">${copyableContent(titleInner, track.name, "track")}</div>
             <div class="list-sub">${copyableContent(escapeHtml(subtitle), subtitle, "track details")}</div>
-            <div class="track-genre-line">${renderGenreContent(track.id)}</div>
+            <div class="track-genre-line">${renderGenreContent(track.id, genrePreset)}</div>
           </div>
         </div>
         <div class="track-desktop-only">${copyableContent(titleInner, track.name, "track")}</div>
@@ -554,8 +554,7 @@ function renderTrackRow(track, extraCells = "") {
       ${copyableCell(escapeHtml(track.artists), track.artists, { className: "muted-cell desktop-only col-artist", label: "artist" })}
       ${copyableCell(escapeHtml(album), album, { className: "muted-cell desktop-only col-album", label: "album" })}
       <td class="num muted-cell desktop-only col-duration">${formatDuration(track.durationMs)}</td>
-      ${extraCells}
-      ${renderGenreCell(track.id)}
+      <td class="genre-col desktop-only">${renderGenreContent(track.id, genrePreset)}</td>
     </tr>`;
 }
 
@@ -712,6 +711,15 @@ function renderReportPanel() {
   const report = state.report;
   const p = report.playlist;
   const total = report.artistCount;
+  const tracks = report.tracks ?? [];
+  const tracksSection =
+    tracks.length > 0
+      ? `
+      <section class="report-tracks-section">
+        <h3 class="report-section-title">Tracks</h3>
+        <div class="table-wrap">${renderReportTracksTable(report)}</div>
+      </section>`
+      : "";
 
   return `
     <div class="main-panel card report-panel">
@@ -740,6 +748,7 @@ function renderReportPanel() {
           <div class="table-wrap">${renderArtistsTable(report)}</div>
         </section>
       </div>
+      ${tracksSection}
     </div>
   `;
 }
@@ -774,6 +783,12 @@ function filteredArtists(report) {
   return artists.filter((artist) => (artist.genres ?? []).includes(state.selectedGenre));
 }
 
+function filteredTracks(report) {
+  const tracks = report.tracks ?? [];
+  if (!state.selectedGenre) return tracks;
+  return tracks.filter((track) => (track.genres ?? []).includes(state.selectedGenre));
+}
+
 function renderArtistGenresCell(genres) {
   if (!genres.length) return `<td class="muted-cell genres-cell">—</td>`;
   const tags = genres
@@ -790,6 +805,7 @@ function onSelectGenre(genre) {
   if (!genre) return;
   state.selectedGenre = state.selectedGenre === genre ? null : genre;
   state.reportPage.artists = 0;
+  state.reportPage.tracks = 0;
   render();
 }
 
@@ -873,6 +889,41 @@ function renderArtistsTable(report) {
       rangeEnd,
       total,
       action: "report-page-artists",
+    })}
+  `;
+}
+
+function renderReportTracksTable(report) {
+  const tracks = filteredTracks(report);
+  const page = state.reportPage.tracks;
+  const { slice, total, hasPrev, hasMore, rangeStart, rangeEnd } = paginateItems(tracks, page);
+  if (total === 0) {
+    return `<p class="muted-note">No tracks match the selected genre.</p>`;
+  }
+  return `
+    <table class="data-table tracks-table">
+      <thead>
+        <tr>
+          <th class="thumb-col desktop-only"></th>
+          <th>Track</th>
+          <th class="desktop-only">Artist</th>
+          <th class="desktop-only">Album</th>
+          <th class="num desktop-only">Duration</th>
+          <th class="desktop-only">Genre</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${slice.map((track) => renderTrackRow(track)).join("")}
+      </tbody>
+    </table>
+    ${renderPaginationControls({
+      page,
+      hasPrev,
+      hasMore,
+      rangeStart,
+      rangeEnd,
+      total,
+      action: "report-page-tracks",
     })}
   `;
 }
@@ -972,7 +1023,7 @@ async function runAnalysis(label, path, body = {}, { restore = false } = {}) {
       state.report = result.report;
       state.reportCached = Boolean(result.cached);
       if (!restore) {
-        state.reportPage = { genres: 0, artists: 0 };
+        state.reportPage = { genres: 0, artists: 0, tracks: 0 };
       }
       state.panelMode = "report";
       syncUrl({ history: "push" });
@@ -1195,6 +1246,23 @@ function bindEvents() {
         syncUrl({ history: "push" });
       } else if (direction === "prev" && page > 0) {
         state.reportPage.artists = page - 1;
+        render();
+        syncUrl({ history: "push" });
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-report-page-tracks]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const direction = button.dataset.reportPageTracks;
+      const page = state.reportPage.tracks;
+      const total = filteredTracks(state.report ?? { tracks: [] }).length;
+      if (direction === "next" && (page + 1) * REPORT_PAGE_SIZE < total) {
+        state.reportPage.tracks = page + 1;
+        render();
+        syncUrl({ history: "push" });
+      } else if (direction === "prev" && page > 0) {
+        state.reportPage.tracks = page - 1;
         render();
         syncUrl({ history: "push" });
       }

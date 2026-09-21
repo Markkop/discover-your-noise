@@ -50,6 +50,7 @@ export function buildSearchFromState(state, looksLikePlaylistUrl) {
     search.analyze = state.analyzeContext;
     if (state.reportPage.genres > 0) search.gp = state.reportPage.genres;
     if (state.reportPage.artists > 0) search.ap = state.reportPage.artists;
+    if (state.reportPage.tracks > 0) search.tp = state.reportPage.tracks;
     return search;
   }
 
@@ -83,6 +84,7 @@ export function applySearchToState(search, state, looksLikePlaylistUrl) {
   state.reportPage = {
     genres: Math.max(0, Number(search.gp) || 0),
     artists: Math.max(0, Number(search.ap) || 0),
+    tracks: Math.max(0, Number(search.tp) || 0),
   };
 
   const hasTextSearch = query && !looksLikePlaylistUrl(query);
