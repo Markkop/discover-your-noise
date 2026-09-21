@@ -213,21 +213,25 @@ app.post("/api/auth/logout", (c) => {
 });
 
 function wantsCacheRefresh(body) {
-  return body?.refresh === true || body?.refresh === "true";
+  const value = body?.refresh;
+  return value === true || value === "true" || value === 1 || value === "1";
 }
 
 async function handleAnalyze(c, { cacheKey, body, run }) {
-  if (wantsCacheRefresh(body) && cacheKey) {
+  const skipCache = wantsCacheRefresh(body);
+  if (skipCache && cacheKey) {
     deleteCache(cacheKey);
   }
+  const useCache = Boolean(cacheKey) && !skipCache;
+
   if (wantsStream(body, c.req.header("accept"))) {
     return streamAnalyze(async (onProgress) => {
-      if (cacheKey) return withCache(cacheKey, run, onProgress);
+      if (useCache) return withCache(cacheKey, run, onProgress);
       return { ...(await run(onProgress)), cached: false };
     });
   }
   try {
-    const result = cacheKey
+    const result = useCache
       ? await withCache(cacheKey, run)
       : { ...(await run()), cached: false };
     return c.json(result);
