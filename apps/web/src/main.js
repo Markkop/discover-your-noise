@@ -1,4 +1,9 @@
 import "./style.css";
+import {
+  applySearchToState,
+  readLocationSearch,
+  syncUrlFromState,
+} from "./url-state.mjs";
 
 const API = "";
 
@@ -20,7 +25,7 @@ const LIBRARY_PAGE_SIZE = 50;
 const REPORT_PAGE_SIZE = 50;
 
 function authUrl() {
-  const returnTo = encodeURIComponent(window.location.origin);
+  const returnTo = encodeURIComponent(window.location.href);
   return `/api/auth/spotify?return_to=${returnTo}`;
 }
 
@@ -33,6 +38,7 @@ const state = {
   progress: { pct: 0, message: "" },
   report: null,
   reportCached: false,
+  analyzeContext: null,
   panelMode: "library",
   libraryTab: "recent",
   error: null,
@@ -51,11 +57,59 @@ const state = {
   recentBeforeByPage: [null],
   libraryLoading: false,
   reportPage: { genres: 0, artists: 0 },
+  selectedGenre: null,
   trackGenres: {},
   searchDebounce: null,
+  urlDebounce: null,
 };
 
 const app = document.getElementById("app");
+
+function syncUrl(options = {}) {
+  syncUrlFromState(state, looksLikePlaylistUrl, options);
+}
+
+function applyUrlSearch(search = readLocationSearch()) {
+  return applySearchToState(search, state, looksLikePlaylistUrl);
+}
+
+async function rebuildRecentCursors(targetPage) {
+  state.recentBeforeByPage = [null];
+  for (let page = 0; page < targetPage; page += 1) {
+    const before = state.recentBeforeByPage[page];
+    const beforeParam = before ? `&before=${encodeURIComponent(before)}` : "";
+    const res = await api(`/api/library/recent?limit=${LIBRARY_PAGE_SIZE}${beforeParam}`);
+    state.recentBeforeByPage[page + 1] = res.nextBefore ?? null;
+  }
+}
+
+async function hydrateLibraryView() {
+  if (!state.me?.connected) return;
+  const recentPage = state.libraryPage.recent ?? 0;
+  if (state.libraryTab === "recent" && recentPage > 0) {
+    await rebuildRecentCursors(recentPage);
+  }
+  await loadLibraryTab(state.libraryTab);
+}
+
+async function hydrateFromUrl(mode) {
+  if (!state.me?.connected) return;
+  if (mode === "restore-report") {
+    await restoreAnalysis();
+    return;
+  }
+  if (mode === "search") {
+    await performSearch();
+    return;
+  }
+  await hydrateLibraryView();
+}
+
+async function handlePopState() {
+  const mode = applyUrlSearch();
+  render();
+  await hydrateFromUrl(mode);
+}
 
 function pct(n, total) {
   if (!total) return "0%";
@@ -135,10 +189,6 @@ async function loadLibraryTab(tab = state.libraryTab) {
   }
 }
 
-async function loadLibrary() {
-  await loadLibraryTab(state.libraryTab);
-}
-
 function paginateItems(items, page, pageSize = REPORT_PAGE_SIZE) {
   const total = items.length;
   const start = page * pageSize;
@@ -213,6 +263,7 @@ async function onLibraryPageChange(direction) {
     return;
   }
   await loadLibraryTab(tab);
+  syncUrl({ history: "push" });
 }
 
 function render() {
@@ -222,7 +273,7 @@ function render() {
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">◉</span>
+          <img class="brand-mark" src="/favicon.svg" width="36" height="36" alt="" />
           <div>
             <h1>Discover Your Noise</h1>
             <p class="tagline">Every Noise genres from your Spotify library</p>
@@ -683,11 +734,9 @@ function renderReportPanel() {
 
       <div class="report-split">
         <section class="report-column">
-          <h3 class="report-section-title">Genres</h3>
           <div class="table-wrap">${renderGenresTable(report)}</div>
         </section>
         <section class="report-column">
-          <h3 class="report-section-title">Artists</h3>
           <div class="table-wrap">${renderArtistsTable(report)}</div>
         </section>
       </div>
@@ -714,6 +763,36 @@ function coverageLabel(kind) {
   return "Unmapped";
 }
 
+function renderSelectableGenre(genre) {
+  const selected = state.selectedGenre === genre;
+  return `<button type="button" class="genre-tag ${selected ? "selected" : ""}" data-select-genre="${escapeAttr(genre)}">${escapeHtml(genre)}</button>`;
+}
+
+function filteredArtists(report) {
+  const artists = allArtists(report);
+  if (!state.selectedGenre) return artists;
+  return artists.filter((artist) => (artist.genres ?? []).includes(state.selectedGenre));
+}
+
+function renderArtistGenresCell(genres) {
+  if (!genres.length) return `<td class="muted-cell genres-cell">—</td>`;
+  const tags = genres
+    .map((genre, index) => {
+      const sep = index > 0 ? `<span class="genre-sep">, </span>` : "";
+      return `${sep}${renderSelectableGenre(genre)}`;
+    })
+    .join("");
+  const copyText = genres.join(", ");
+  return `<td class="muted-cell genres-cell copyable-cell"><span class="genre-tags">${tags}</span>${copyBtn(copyText, "genres")}</td>`;
+}
+
+function onSelectGenre(genre) {
+  if (!genre) return;
+  state.selectedGenre = state.selectedGenre === genre ? null : genre;
+  state.reportPage.artists = 0;
+  render();
+}
+
 function renderGenresTable(report) {
   const page = state.reportPage.genres;
   const { slice, total, hasPrev, hasMore, rangeStart, rangeEnd } = paginateItems(
@@ -729,8 +808,8 @@ function renderGenresTable(report) {
         ${slice
           .map(
             (g) => `
-          <tr>
-            ${copyableCell(escapeHtml(g.genre), g.genre, { label: "genre" })}
+          <tr class="${state.selectedGenre === g.genre ? "genre-row-selected" : ""}">
+            ${copyableCell(renderSelectableGenre(g.genre), g.genre, { label: "genre" })}
             <td class="num">${g.direct}</td>
             <td class="num">${g.inferred}</td>
             <td class="num">${g.total}</td>
@@ -753,7 +832,7 @@ function renderGenresTable(report) {
 }
 
 function renderArtistsTable(report) {
-  const artists = allArtists(report);
+  const artists = filteredArtists(report);
   const page = state.reportPage.artists;
   const { slice, total, hasPrev, hasMore, rangeStart, rangeEnd } = paginateItems(artists, page);
   return `
@@ -778,20 +857,9 @@ function renderArtistsTable(report) {
               artist.name,
               { label: "artist" },
             )}
-            ${copyableCell(
-              `<span class="badge badge-${escapeAttr(artist.kind)}">${coverageLabel(artist.kind)}</span>`,
-              coverageLabel(artist.kind),
-              { label: "coverage" },
-            )}
+            <td><span class="badge badge-${escapeAttr(artist.kind)}">${coverageLabel(artist.kind)}</span></td>
             <td class="num">${genres.length}</td>
-            ${
-              genres.length
-                ? copyableCell(escapeHtml(genres.join(", ")), genres.join(", "), {
-                    className: "muted-cell genres-cell",
-                    label: "genres",
-                  })
-                : `<td class="muted-cell genres-cell">—</td>`
-            }
+            ${renderArtistGenresCell(genres)}
           </tr>`;
           })
           .join("")}
@@ -885,7 +953,8 @@ async function analyzeStream(path, body = {}) {
   return result;
 }
 
-async function runAnalysis(label, path, body = {}) {
+async function runAnalysis(label, path, body = {}, { restore = false } = {}) {
+  state.analyzeContext = { path, body, label };
   state.loading = true;
   state.loadingLabel = label;
   state.progress = { pct: 0, message: label };
@@ -893,6 +962,7 @@ async function runAnalysis(label, path, body = {}) {
   state.authRequired = null;
   state.report = null;
   state.reportCached = false;
+  state.selectedGenre = null;
   render();
   try {
     const result = await analyzeStream(path, body);
@@ -901,8 +971,11 @@ async function runAnalysis(label, path, body = {}) {
     } else if (result.status === "ok") {
       state.report = result.report;
       state.reportCached = Boolean(result.cached);
-      state.reportPage = { genres: 0, artists: 0 };
+      if (!restore) {
+        state.reportPage = { genres: 0, artists: 0 };
+      }
       state.panelMode = "report";
+      syncUrl({ history: "push" });
     } else {
       state.error = result.error ?? "Analysis failed.";
     }
@@ -914,6 +987,12 @@ async function runAnalysis(label, path, body = {}) {
     state.progress = { pct: 0, message: "" };
     render();
   }
+}
+
+async function restoreAnalysis() {
+  if (!state.analyzeContext) return;
+  const { label, path, body } = state.analyzeContext;
+  await runAnalysis(label, path, body ?? {}, { restore: true });
 }
 
 async function onAnalyzeUrl() {
@@ -996,12 +1075,18 @@ async function performSearch() {
   } finally {
     state.searchLoading = false;
     render();
+    syncUrl();
   }
 }
 
 function scheduleSearch() {
   clearTimeout(state.searchDebounce);
   state.searchDebounce = setTimeout(performSearch, 300);
+}
+
+function scheduleUrlSync() {
+  clearTimeout(state.urlDebounce);
+  state.urlDebounce = setTimeout(() => syncUrl(), 200);
 }
 
 function bindEvents() {
@@ -1015,7 +1100,10 @@ function bindEvents() {
   document.getElementById("back-to-list")?.addEventListener("click", () => {
     state.panelMode = "library";
     state.report = null;
+    state.analyzeContext = null;
+    state.selectedGenre = null;
     render();
+    syncUrl({ history: "push" });
   });
 
   document.getElementById("search-input")?.addEventListener("input", (event) => {
@@ -1023,9 +1111,11 @@ function bindEvents() {
     if (looksLikePlaylistUrl(state.searchQuery)) {
       state.searchResults = null;
       render();
+      scheduleUrlSync();
       return;
     }
     scheduleSearch();
+    scheduleUrlSync();
   });
 
   document.getElementById("search-input")?.addEventListener("keydown", (event) => {
@@ -1039,14 +1129,19 @@ function bindEvents() {
     state.searchQuery = "";
     state.searchResults = null;
     state.panelMode = "library";
+    state.analyzeContext = null;
     render();
+    syncUrl({ history: "push" });
   });
 
   document.querySelectorAll("[data-search-type]").forEach((button) => {
     button.addEventListener("click", () => {
       state.searchType = button.dataset.searchType;
       if (state.searchQuery.trim() && !looksLikePlaylistUrl(state.searchQuery)) performSearch();
-      else render();
+      else {
+        render();
+        syncUrl({ history: "push" });
+      }
     });
   });
 
@@ -1055,12 +1150,15 @@ function bindEvents() {
       const tab = button.dataset.libraryTab;
       state.panelMode = "library";
       state.report = null;
+      state.analyzeContext = null;
       if (state.libraryTab !== tab) {
         state.libraryTab = tab;
         await loadLibraryTab(tab);
+        syncUrl({ history: "push" });
         return;
       }
       render();
+      syncUrl({ history: "push" });
     });
   });
 
@@ -1075,9 +1173,11 @@ function bindEvents() {
       if (direction === "next" && (page + 1) * REPORT_PAGE_SIZE < (state.report?.genres?.length ?? 0)) {
         state.reportPage.genres = page + 1;
         render();
+        syncUrl({ history: "push" });
       } else if (direction === "prev" && page > 0) {
         state.reportPage.genres = page - 1;
         render();
+        syncUrl({ history: "push" });
       }
     });
   });
@@ -1086,13 +1186,17 @@ function bindEvents() {
     button.addEventListener("click", () => {
       const direction = button.dataset.reportPageArtists;
       const page = state.reportPage.artists;
-      const total = allArtists(state.report ?? { directArtists: [], inferredArtists: [], unmappedArtists: [] }).length;
+      const total = filteredArtists(
+        state.report ?? { directArtists: [], inferredArtists: [], unmappedArtists: [] },
+      ).length;
       if (direction === "next" && (page + 1) * REPORT_PAGE_SIZE < total) {
         state.reportPage.artists = page + 1;
         render();
+        syncUrl({ history: "push" });
       } else if (direction === "prev" && page > 0) {
         state.reportPage.artists = page - 1;
         render();
+        syncUrl({ history: "push" });
       }
     });
   });
@@ -1113,6 +1217,13 @@ function bindEvents() {
 
   document.querySelectorAll("[data-copy-text]").forEach((button) => {
     button.addEventListener("click", () => onCopyText(button));
+  });
+
+  document.querySelectorAll("[data-select-genre]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onSelectGenre(button.dataset.selectGenre);
+    });
   });
 }
 
@@ -1142,20 +1253,23 @@ async function onLogout() {
   state.searchQuery = "";
   state.panelMode = "library";
   state.report = null;
+  state.analyzeContext = null;
   state.trackGenres = {};
   render();
+  syncUrl();
 }
 
 async function init() {
-  const params = new URLSearchParams(location.search);
-  if (params.get("auth") === "ok") {
-    history.replaceState({}, "", location.pathname);
-  }
+  const mode = applyUrlSearch();
   await loadMe();
   render();
   if (state.me?.connected) {
-    await loadLibrary();
+    await hydrateFromUrl(mode);
   }
+  syncUrl();
+  window.addEventListener("popstate", () => {
+    void handlePopState();
+  });
 }
 
 init();

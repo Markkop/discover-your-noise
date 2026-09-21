@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Discover Your Noise">
+  <defs>
+    <linearGradient id="dyn-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1ed760" />
+      <stop offset="100%" stop-color="#0d6e36" />
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="16" fill="url(#dyn-gradient)" />
+  <circle cx="16" cy="16" r="7.25" fill="none" stroke="#041007" stroke-width="3.25" />
+  <circle cx="16" cy="16" r="2.75" fill="#041007" />
+</svg>

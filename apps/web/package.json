@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "@tanstack/router-core": "^1.171.32"
   }
 }

@@ -51,15 +51,9 @@ body {
 }
 
 .brand-mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), #0d6e36);
-  color: #041007;
-  font-size: 1rem;
   flex-shrink: 0;
   margin-top: 0.15rem;
 }
@@ -928,6 +922,44 @@ table {
   color: var(--muted);
   line-height: 1.45;
   min-width: 220px;
+}
+
+.genre-tag {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.genre-tag:hover {
+  color: var(--accent);
+}
+
+.genre-tag.selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.genre-row-selected td:first-child {
+  color: var(--accent);
+}
+
+.genre-row-selected .genre-tag {
+  font-weight: 600;
+}
+
+.genre-tags {
+  display: inline;
+}
+
+.genre-sep {
+  color: var(--muted);
 }
 
 .artist-link {

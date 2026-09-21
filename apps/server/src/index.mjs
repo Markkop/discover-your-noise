@@ -62,14 +62,20 @@ function isAllowedOrigin(origin) {
 }
 
 function normalizeReturnTo(value) {
-  if (!value) return FE_ORIGIN;
+  if (!value) return new URL(FE_ORIGIN);
   try {
     const url = new URL(value);
-    if (!isAllowedOrigin(url.origin)) return FE_ORIGIN;
-    return url.origin;
+    if (!isAllowedOrigin(url.origin)) return new URL(FE_ORIGIN);
+    return url;
   } catch {
-    return FE_ORIGIN;
+    return new URL(FE_ORIGIN);
   }
+}
+
+function redirectWithAuthParam(returnTo, authValue) {
+  const url = normalizeReturnTo(returnTo);
+  url.searchParams.set("auth", authValue);
+  return url.toString();
 }
 
 function lanAddresses() {
@@ -151,7 +157,7 @@ app.get("/api/auth/spotify", (c) => {
   }
   const { verifier, challenge } = createPkcePair();
   const state = randomBytes(16).toString("hex");
-  const returnTo = normalizeReturnTo(c.req.query("return_to"));
+  const returnTo = normalizeReturnTo(c.req.query("return_to")).toString();
   storeOAuthState(state, { verifier, returnTo });
   return c.redirect(
     buildAuthorizeUrl({
@@ -168,9 +174,9 @@ app.get("/api/auth/callback", async (c) => {
   const code = c.req.query("code");
   const state = c.req.query("state");
   const stored = state ? consumeOAuthState(state) : null;
-  const returnTo = normalizeReturnTo(stored?.returnTo);
+  const returnTo = stored?.returnTo;
   if (!code || !stored) {
-    return c.redirect(`${returnTo}?auth=failed`);
+    return c.redirect(redirectWithAuthParam(returnTo, "failed"));
   }
   const tokens = await exchangeCode({
     code,
@@ -187,7 +193,7 @@ app.get("/api/auth/callback", async (c) => {
     displayName: profile?.display_name ?? profile?.id,
   });
   writeSessionCookie(c, sessionId);
-  return c.redirect(`${returnTo}?auth=ok`);
+  return c.redirect(redirectWithAuthParam(returnTo, "ok"));
 });
 
 app.post("/api/auth/logout", (c) => {
