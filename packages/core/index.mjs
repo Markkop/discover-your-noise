@@ -2,6 +2,11 @@ const SPOTIFY_HOST = "open.spotify.com";
 const SPOTIFY_ID_PATTERN = /^[A-Za-z0-9]{22}$/;
 const EVERY_NOISE_API = "https://everynoise.com/api";
 const DIRECT_BATCH_SIZE = 50;
+const EVERY_NOISE_MIN_INTERVAL_MS = Number(process.env.EVERY_NOISE_MIN_INTERVAL_MS ?? 200);
+
+const directGenreCache = new Map();
+const canonCache = new Map();
+let lastEveryNoiseRequestAt = 0;
 
 export class ActionRequiredError extends Error {
   constructor(message, details = {}) {
@@ -179,6 +184,28 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+export function getEveryNoiseConfig() {
+  return {
+    batchSize: DIRECT_BATCH_SIZE,
+    minIntervalMs: EVERY_NOISE_MIN_INTERVAL_MS,
+  };
+}
+
+async function throttleEveryNoise() {
+  const now = Date.now();
+  const wait = EVERY_NOISE_MIN_INTERVAL_MS - (now - lastEveryNoiseRequestAt);
+  if (wait > 0) await delay(wait);
+  lastEveryNoiseRequestAt = Date.now();
+}
+
+function emitProgress(onProgress, update) {
+  if (!onProgress) return;
+  const pct =
+    update.pct ??
+    (update.total ? Math.min(100, Math.round((update.done / update.total) * 100)) : 0);
+  onProgress({ ...update, pct });
+}
+
 export async function fetchJsonWithRetry(url, fetchImpl = fetch, retries = 2) {
   let attempt = 0;
   while (true) {
@@ -212,15 +239,33 @@ export async function fetchJsonWithRetry(url, fetchImpl = fetch, retries = 2) {
   }
 }
 
-async function fetchGenreMap(ids, fetchImpl) {
+async function everyNoiseFetch(url, fetchImpl, retries = 2) {
+  await throttleEveryNoise();
+  return fetchJsonWithRetry(url, fetchImpl, retries);
+}
+
+async function fetchGenreMap(ids, fetchImpl, onBatch) {
   const genreMap = {};
-  for (const batch of chunks([...new Set(ids)], DIRECT_BATCH_SIZE)) {
-    if (batch.length === 0) continue;
-    const data = await fetchJsonWithRetry(
-      `${EVERY_NOISE_API}/${batch.map(encodeURIComponent).join(",")}`,
-      fetchImpl,
-    );
-    Object.assign(genreMap, data);
+  const unique = [...new Set(ids)];
+  const uncached = unique.filter((id) => !directGenreCache.has(id));
+  const batches = chunks(uncached, DIRECT_BATCH_SIZE);
+
+  for (let index = 0; index < batches.length; index += 1) {
+    const batch = batches[index];
+    if (batch.length > 0) {
+      const data = await everyNoiseFetch(
+        `${EVERY_NOISE_API}/${batch.map(encodeURIComponent).join(",")}`,
+        fetchImpl,
+      );
+      for (const [id, genres] of Object.entries(data)) {
+        directGenreCache.set(id, Array.isArray(genres) ? genres : []);
+      }
+    }
+    onBatch?.(index + 1, batches.length);
+  }
+
+  for (const id of unique) {
+    genreMap[id] = directGenreCache.get(id) ?? [];
   }
   return genreMap;
 }
@@ -247,11 +292,34 @@ export function inferGenres(relatedIds, relatedGenreMap, maximum = 10) {
   return inferred;
 }
 
-export async function classifyArtists(artists, fetchImpl = fetch) {
+export async function classifyArtists(artists, fetchImpl = fetch, options = {}) {
+  const { onProgress } = options;
+  const total = artists.length;
+  if (total === 0) return [];
+
+  emitProgress(onProgress, {
+    phase: "direct",
+    done: 0,
+    total,
+    message: "Looking up direct Every Noise mappings…",
+  });
+
+  const directBatches = chunks(artists.map((artist) => artist.id), DIRECT_BATCH_SIZE).length || 1;
+  let directBatchDone = 0;
   const directGenreMap = await fetchGenreMap(
     artists.map((artist) => artist.id),
     fetchImpl,
+    () => {
+      directBatchDone += 1;
+      emitProgress(onProgress, {
+        phase: "direct",
+        done: Math.min(total, Math.round((directBatchDone / directBatches) * total * 0.45)),
+        total,
+        message: `Direct mappings (${directBatchDone}/${directBatches} batches)…`,
+      });
+    },
   );
+
   const direct = new Map();
   const missing = [];
   for (const artist of artists) {
@@ -261,15 +329,45 @@ export async function classifyArtists(artists, fetchImpl = fetch) {
   }
 
   const canonByArtist = new Map();
-  for (const artist of missing) {
-    const data = await fetchJsonWithRetry(
-      `${EVERY_NOISE_API}/canon/${encodeURIComponent(artist.id)}`,
-      fetchImpl,
-    );
-    canonByArtist.set(artist.id, Array.isArray(data[artist.id]) ? data[artist.id] : []);
+  for (let index = 0; index < missing.length; index += 1) {
+    const artist = missing[index];
+    let related = canonCache.get(artist.id);
+    if (!related) {
+      const data = await everyNoiseFetch(
+        `${EVERY_NOISE_API}/canon/${encodeURIComponent(artist.id)}`,
+        fetchImpl,
+      );
+      related = Array.isArray(data[artist.id]) ? data[artist.id] : [];
+      canonCache.set(artist.id, related);
+    }
+    canonByArtist.set(artist.id, related);
+    emitProgress(onProgress, {
+      phase: "canon",
+      done: Math.round(total * 0.45 + ((index + 1) / Math.max(1, missing.length)) * total * 0.4),
+      total,
+      message: `Inferring from related artists (${index + 1}/${missing.length})…`,
+    });
   }
+
   const allRelatedIds = [...new Set([...canonByArtist.values()].flat())];
-  const relatedGenreMap = await fetchGenreMap(allRelatedIds, fetchImpl);
+  const relatedBatches = chunks(allRelatedIds, DIRECT_BATCH_SIZE).length || 1;
+  let relatedBatchDone = 0;
+  const relatedGenreMap = await fetchGenreMap(allRelatedIds, fetchImpl, () => {
+    relatedBatchDone += 1;
+    emitProgress(onProgress, {
+      phase: "related",
+      done: Math.round(total * 0.85 + (relatedBatchDone / relatedBatches) * total * 0.15),
+      total,
+      message: `Loading related artist genres (${relatedBatchDone}/${relatedBatches} batches)…`,
+    });
+  });
+
+  emitProgress(onProgress, {
+    phase: "done",
+    done: total,
+    total,
+    message: "Building genre report…",
+  });
 
   return artists.map((artist) => {
     if (direct.has(artist.id)) {
@@ -365,12 +463,12 @@ export function formatReport(report) {
   return lines.join("\n");
 }
 
-export async function analyzeArtists(playlist, artists, fetchImpl = fetch) {
-  const classifications = await classifyArtists(artists, fetchImpl);
+export async function analyzeArtists(playlist, artists, fetchImpl = fetch, options = {}) {
+  const classifications = await classifyArtists(artists, fetchImpl, options);
   return buildReportData(playlist, classifications);
 }
 
-export async function analyzePublicPlaylist(input, fetchImpl = fetch) {
+export async function analyzePublicPlaylist(input, fetchImpl = fetch, options = {}) {
   const id = parsePlaylistId(input);
   const url = `https://${SPOTIFY_HOST}/playlist/${id}`;
   const response = await fetchImpl(url, { headers: { Accept: "text/html" } });
@@ -403,15 +501,31 @@ export async function analyzePublicPlaylist(input, fetchImpl = fetch) {
       { reason: "no_artists" },
     );
   }
-  return analyzeArtists(page.playlist, page.artists, fetchImpl);
+  return analyzeArtists(page.playlist, page.artists, fetchImpl, options);
 }
 
-export async function analyzeFromTracks(playlist, tracks, fetchImpl = fetch) {
+export async function analyzeFromTracks(playlist, tracks, fetchImpl = fetch, options = {}) {
   const artists = artistsFromTrackRows(tracks);
   if (artists.length === 0) {
     throw new Error("No valid artists found in track data.");
   }
-  return analyzeArtists(playlist, artists, fetchImpl);
+  return analyzeArtists(playlist, artists, fetchImpl, options);
+}
+
+export async function fetchTrackArtists(trackId, accessToken, fetchImpl = fetch) {
+  const track = await spotifyApi(accessToken, `/tracks/${trackId}`, fetchImpl);
+  return (track.artists ?? [])
+    .filter((artist) => artist?.id)
+    .map((artist) => ({ id: artist.id, name: artist.name ?? artist.id }));
+}
+
+export async function classifyTrackGenres(artists, fetchImpl = fetch, options = {}) {
+  const classifications = await classifyArtists(artists, fetchImpl, options);
+  const genres = new Set();
+  for (const artist of classifications) {
+    for (const genre of artist.genres ?? []) genres.add(genre);
+  }
+  return [...genres].sort((left, right) => left.localeCompare(right));
 }
 
 export async function spotifyApi(accessToken, path, fetchImpl = fetch) {
@@ -500,10 +614,297 @@ export async function fetchLikedForAnalysis(accessToken, limit = 100, fetchImpl 
     url = items.length < limit ? payload.next : null;
   }
   const tracks = tracksFromSpotifyItems(items);
+  const reachedCap = items.length >= limit && limit >= 5000;
   return {
     playlist: {
       url: "",
-      title: `Liked songs (latest ${tracks.length})`,
+      title: reachedCap
+        ? `Liked songs (${tracks.length})`
+        : `Liked songs (latest ${tracks.length})`,
+      expectedTrackCount: tracks.length,
+    },
+    tracks,
+  };
+}
+
+function imageFromSpotify(images) {
+  const list = images ?? [];
+  return list[0]?.url ?? null;
+}
+
+function mapSavedTrackItem(item) {
+  const track = item.track ?? {};
+  return {
+    id: track.id,
+    name: track.name ?? "Unknown track",
+    url: track.external_urls?.spotify ?? "",
+    image: imageFromSpotify(track.album?.images),
+    artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(", "),
+    album: track.album?.name ?? "",
+    durationMs: track.duration_ms ?? null,
+    addedAt: item.added_at ?? null,
+  };
+}
+
+function mapRecentTrackItem(item) {
+  const track = item.track ?? {};
+  return {
+    id: track.id,
+    name: track.name ?? "Unknown track",
+    url: track.external_urls?.spotify ?? "",
+    image: imageFromSpotify(track.album?.images),
+    artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(", "),
+    album: track.album?.name ?? "",
+    durationMs: track.duration_ms ?? null,
+    playedAt: item.played_at ?? null,
+  };
+}
+
+function mapPlaylistItem(playlist) {
+  return {
+    id: playlist.id,
+    name: playlist.name ?? "Untitled playlist",
+    url: playlist.external_urls?.spotify ?? `https://open.spotify.com/playlist/${playlist.id}`,
+    image: imageFromSpotify(playlist.images),
+    trackCount: playlist.tracks?.total ?? 0,
+    owner: playlist.owner?.display_name ?? playlist.owner?.id ?? "",
+  };
+}
+
+export async function fetchUserPlaylistsPage(
+  accessToken,
+  { limit = 50, offset = 0 } = {},
+  fetchImpl = fetch,
+) {
+  const capped = Math.min(50, Math.max(1, limit));
+  const safeOffset = Math.max(0, offset);
+  const response = await fetchImpl(
+    `https://api.spotify.com/v1/me/playlists?limit=${capped}&offset=${safeOffset}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Spotify API ${response.status}: ${body.slice(0, 200)}`);
+  }
+  const payload = await response.json();
+  const playlists = (payload.items ?? []).map(mapPlaylistItem);
+  return {
+    playlists,
+    total: payload.total ?? playlists.length,
+    hasMore: Boolean(payload.next),
+    offset: payload.offset ?? safeOffset,
+    limit: capped,
+  };
+}
+
+export async function fetchRecentlyPlayedPage(
+  accessToken,
+  { limit = 50, before = null } = {},
+  fetchImpl = fetch,
+) {
+  const capped = Math.min(50, Math.max(1, limit));
+  let path = `/me/player/recently-played?limit=${capped}`;
+  if (before) path += `&before=${encodeURIComponent(before)}`;
+  const payload = await spotifyApi(accessToken, path, fetchImpl);
+  const tracks = (payload.items ?? []).map(mapRecentTrackItem);
+  const nextBefore = payload.cursors?.before ?? null;
+  return {
+    tracks,
+    hasMore: Boolean(payload.next ?? nextBefore),
+    nextBefore,
+    limit: capped,
+  };
+}
+
+export async function fetchLikedTracksPage(
+  accessToken,
+  { limit = 50, offset = 0 } = {},
+  fetchImpl = fetch,
+) {
+  const capped = Math.min(50, Math.max(1, limit));
+  const safeOffset = Math.max(0, offset);
+  const response = await fetchImpl(
+    `https://api.spotify.com/v1/me/tracks?limit=${capped}&offset=${safeOffset}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Spotify API ${response.status}: ${body.slice(0, 200)}`);
+  }
+  const payload = await response.json();
+  const tracks = (payload.items ?? []).map(mapSavedTrackItem);
+  return {
+    tracks,
+    total: payload.total ?? tracks.length,
+    hasMore: Boolean(payload.next),
+    offset: payload.offset ?? safeOffset,
+    limit: capped,
+  };
+}
+
+export async function fetchUserPlaylists(accessToken, limit = 50, fetchImpl = fetch) {
+  const items = [];
+  let url = `https://api.spotify.com/v1/me/playlists?limit=50`;
+  while (url && items.length < limit) {
+    const response = await fetchImpl(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Spotify API ${response.status}: ${body.slice(0, 200)}`);
+    }
+    const payload = await response.json();
+    for (const item of payload.items ?? []) {
+      if (items.length >= limit) break;
+      items.push(item);
+    }
+    url = items.length < limit ? payload.next : null;
+  }
+  return items.map(mapPlaylistItem);
+}
+
+export async function fetchRecentlyPlayed(accessToken, limit = 20, fetchImpl = fetch) {
+  const { tracks } = await fetchRecentlyPlayedPage(accessToken, { limit }, fetchImpl);
+  return tracks;
+}
+
+export async function fetchLikedTracks(accessToken, limit = 50, fetchImpl = fetch) {
+  const capped = Math.min(50, Math.max(1, limit));
+  const items = [];
+  let url = `https://api.spotify.com/v1/me/tracks?limit=50`;
+  while (url && items.length < capped) {
+    const response = await fetchImpl(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Spotify API ${response.status}: ${body.slice(0, 200)}`);
+    }
+    const payload = await response.json();
+    for (const item of payload.items ?? []) {
+      if (items.length >= capped) break;
+      items.push(item);
+    }
+    url = items.length < capped ? payload.next : null;
+  }
+  return items.map(mapSavedTrackItem);
+}
+
+export async function fetchRecentForAnalysis(accessToken, limit = 50, fetchImpl = fetch) {
+  const capped = Math.min(50, Math.max(1, limit));
+  const payload = await spotifyApi(
+    accessToken,
+    `/me/player/recently-played?limit=${capped}`,
+    fetchImpl,
+  );
+  const items = payload.items ?? [];
+  const tracks = tracksFromSpotifyItems(items);
+  return {
+    playlist: {
+      url: "",
+      title: `Recently played (latest ${tracks.length})`,
+      expectedTrackCount: tracks.length,
+    },
+    tracks,
+  };
+}
+
+function mapSearchPlaylist(item) {
+  return {
+    id: item.id,
+    type: "playlist",
+    name: item.name ?? "Untitled playlist",
+    url: item.external_urls?.spotify ?? "",
+    image: imageFromSpotify(item.images),
+    subtitle: `${item.tracks?.total ?? 0} tracks · ${item.owner?.display_name ?? ""}`.trim(),
+  };
+}
+
+function mapSearchAlbum(item) {
+  return {
+    id: item.id,
+    type: "album",
+    name: item.name ?? "Untitled album",
+    url: item.external_urls?.spotify ?? "",
+    image: imageFromSpotify(item.images),
+    subtitle: (item.artists ?? []).map((artist) => artist.name).filter(Boolean).join(", "),
+  };
+}
+
+function mapSearchArtist(item) {
+  return {
+    id: item.id,
+    type: "artist",
+    name: item.name ?? "Unknown artist",
+    url: item.external_urls?.spotify ?? "",
+    image: imageFromSpotify(item.images),
+    subtitle: `${item.followers?.total ?? 0} followers`,
+  };
+}
+
+function mapSearchTrack(item) {
+  return {
+    id: item.id,
+    type: "track",
+    name: item.name ?? "Unknown track",
+    url: item.external_urls?.spotify ?? "",
+    image: imageFromSpotify(item.album?.images),
+    subtitle: (item.artists ?? []).map((artist) => artist.name).filter(Boolean).join(", "),
+  };
+}
+
+export async function searchSpotify(accessToken, query, types = ["playlist"], limit = 10, fetchImpl = fetch) {
+  const trimmed = String(query ?? "").trim();
+  if (!trimmed) return { playlists: [], albums: [], artists: [], tracks: [] };
+  const capped = Math.min(20, Math.max(1, limit));
+  const typeParam = types.join(",");
+  const payload = await spotifyApi(
+    accessToken,
+    `/search?q=${encodeURIComponent(trimmed)}&type=${typeParam}&limit=${capped}`,
+    fetchImpl,
+  );
+  return {
+    playlists: (payload.playlists?.items ?? []).filter(Boolean).map(mapSearchPlaylist),
+    albums: (payload.albums?.items ?? []).filter(Boolean).map(mapSearchAlbum),
+    artists: (payload.artists?.items ?? []).filter(Boolean).map(mapSearchArtist),
+    tracks: (payload.tracks?.items ?? []).filter(Boolean).map(mapSearchTrack),
+  };
+}
+
+export async function fetchAlbumTracksForAnalysis(albumId, accessToken, fetchImpl = fetch) {
+  const meta = await spotifyApi(
+    accessToken,
+    `/albums/${albumId}?fields=name,total_tracks,external_urls.spotify,images`,
+    fetchImpl,
+  );
+  const items = await spotifyPaginate(
+    accessToken,
+    `/albums/${albumId}/tracks?limit=50`,
+    fetchImpl,
+  );
+  const tracks = tracksFromSpotifyItems(items);
+  return {
+    playlist: {
+      url: meta.external_urls?.spotify ?? `https://open.spotify.com/album/${albumId}`,
+      title: meta.name ?? "Spotify album",
+      expectedTrackCount: meta.total_tracks ?? tracks.length,
+    },
+    tracks,
+  };
+}
+
+export async function fetchArtistTopTracksForAnalysis(artistId, accessToken, fetchImpl = fetch) {
+  const meta = await spotifyApi(accessToken, `/artists/${artistId}`, fetchImpl);
+  const payload = await spotifyApi(
+    accessToken,
+    `/artists/${artistId}/top-tracks?market=from_token`,
+    fetchImpl,
+  );
+  const tracks = tracksFromSpotifyItems(payload.tracks ?? []);
+  return {
+    playlist: {
+      url: meta.external_urls?.spotify ?? `https://open.spotify.com/artist/${artistId}`,
+      title: `${meta.name ?? "Artist"} — top tracks`,
       expectedTrackCount: tracks.length,
     },
     tracks,

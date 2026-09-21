@@ -107,6 +107,39 @@ test("matches Every Noise's related-artist inference rule", () => {
   ]);
 });
 
+test("emits progress while classifying artists", async () => {
+  const artists = [
+    { id: ARTIST_A, name: "A" },
+    { id: ARTIST_B, name: "B" },
+  ];
+  const progress = [];
+  const fetchImpl = async (url) => {
+    if (url.includes("/canon/")) {
+      return {
+        ok: true,
+        headers: { get: () => null },
+        json: async () => ({ [ARTIST_B]: [] }),
+      };
+    }
+    return {
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({
+        [ARTIST_A]: ["ambient"],
+        [ARTIST_B]: [],
+      }),
+    };
+  };
+
+  const { classifyArtists } = await import("../packages/core/index.mjs");
+  const result = await classifyArtists(artists, fetchImpl, {
+    onProgress: (update) => progress.push(update),
+  });
+  assert.equal(result.length, 2);
+  assert.ok(progress.length > 0);
+  assert.equal(progress.at(-1)?.phase, "done");
+});
+
 test("counts artists and distinguishes direct from inferred genres", () => {
   const playlist = {
     title: "Test playlist",

@@ -20,10 +20,13 @@ export function setCache(key, value, ttlMs = DEFAULT_TTL_MS) {
   store.set(key, { value, expiresAt: Date.now() + ttlMs });
 }
 
-export async function withCache(key, fn) {
+export async function withCache(key, fn, onProgress) {
   const cached = getCache(key);
-  if (cached) return { ...cached, cached: true };
-  const value = await fn();
+  if (cached) {
+    onProgress?.({ phase: "cache", pct: 100, message: "Served from cache." });
+    return { ...cached, cached: true };
+  }
+  const value = await fn(onProgress);
   if (value?.status === "ok") setCache(key, value);
   return { ...value, cached: false };
 }

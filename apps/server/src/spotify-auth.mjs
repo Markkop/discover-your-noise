@@ -6,6 +6,7 @@ const SCOPES = [
   "user-library-read",
   "user-read-private",
   "user-read-email",
+  "user-read-recently-played",
 ].join(" ");
 
 function b64url(buffer) {
