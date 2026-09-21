@@ -1,3 +1,13 @@
+import {
+  clearEveryNoisePersistentCache,
+  configureEveryNoisePersistentCache,
+  getEveryNoisePersistentCacheStats,
+  readPersistentCanon,
+  readPersistentDirectGenres,
+  writePersistentCanon,
+  writePersistentDirectGenres,
+} from "./everynoise-persistent-cache.mjs";
+
 const SPOTIFY_HOST = "open.spotify.com";
 const SPOTIFY_ID_PATTERN = /^[A-Za-z0-9]{22}$/;
 const EVERY_NOISE_API = "https://everynoise.com/api";
@@ -247,7 +257,16 @@ async function everyNoiseFetch(url, fetchImpl, retries = 2) {
 async function fetchGenreMap(ids, fetchImpl, onBatch) {
   const genreMap = {};
   const unique = [...new Set(ids)];
-  const uncached = unique.filter((id) => !directGenreCache.has(id));
+  const uncached = [];
+  for (const id of unique) {
+    if (directGenreCache.has(id)) continue;
+    const fromDisk = await readPersistentDirectGenres(id);
+    if (fromDisk !== undefined) {
+      directGenreCache.set(id, fromDisk);
+      continue;
+    }
+    uncached.push(id);
+  }
   const batches = chunks(uncached, DIRECT_BATCH_SIZE);
 
   for (let index = 0; index < batches.length; index += 1) {
@@ -257,8 +276,10 @@ async function fetchGenreMap(ids, fetchImpl, onBatch) {
         `${EVERY_NOISE_API}/${batch.map(encodeURIComponent).join(",")}`,
         fetchImpl,
       );
-      for (const [id, genres] of Object.entries(data)) {
-        directGenreCache.set(id, Array.isArray(genres) ? genres : []);
+      for (const id of batch) {
+        const genres = Array.isArray(data[id]) ? data[id].filter(Boolean) : [];
+        directGenreCache.set(id, genres);
+        await writePersistentDirectGenres(id, genres);
       }
     }
     onBatch?.(index + 1, batches.length);
@@ -331,15 +352,21 @@ export async function classifyArtists(artists, fetchImpl = fetch, options = {}) 
   const canonByArtist = new Map();
   for (let index = 0; index < missing.length; index += 1) {
     const artist = missing[index];
-    let related = canonCache.get(artist.id);
-    if (!related) {
-      const data = await everyNoiseFetch(
-        `${EVERY_NOISE_API}/canon/${encodeURIComponent(artist.id)}`,
-        fetchImpl,
-      );
-      related = Array.isArray(data[artist.id]) ? data[artist.id] : [];
-      canonCache.set(artist.id, related);
+    if (!canonCache.has(artist.id)) {
+      const fromDisk = await readPersistentCanon(artist.id);
+      if (fromDisk !== undefined) {
+        canonCache.set(artist.id, fromDisk);
+      } else {
+        const data = await everyNoiseFetch(
+          `${EVERY_NOISE_API}/canon/${encodeURIComponent(artist.id)}`,
+          fetchImpl,
+        );
+        const related = Array.isArray(data[artist.id]) ? data[artist.id] : [];
+        canonCache.set(artist.id, related);
+        await writePersistentCanon(artist.id, related);
+      }
     }
+    const related = canonCache.get(artist.id) ?? [];
     canonByArtist.set(artist.id, related);
     emitProgress(onProgress, {
       phase: "canon",
@@ -958,3 +985,16 @@ export async function fetchArtistTopTracksForAnalysis(artistId, accessToken, fet
     tracks,
   };
 }
+
+export function clearEveryNoiseMemoryCaches() {
+  directGenreCache.clear();
+  canonCache.clear();
+}
+
+export {
+  clearEveryNoisePersistentCache,
+  configureEveryNoisePersistentCache,
+  getEveryNoisePersistentCacheDir,
+  getEveryNoisePersistentCacheStats,
+  readPersistentDirectGenres,
+} from "./everynoise-persistent-cache.mjs";

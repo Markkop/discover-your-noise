@@ -17,7 +17,8 @@
     "dev": "npm run dev:server",
     "dev:server": "npm run dev -w @discover-your-noise/server",
     "dev:web": "npm run dev -w @discover-your-noise/web",
-    "build:web": "npm run build -w @discover-your-noise/web"
+    "build:web": "npm run build -w @discover-your-noise/web",
+    "everynoise-cache": "node --env-file=.env apps/server/src/everynoise-cache-cli.mjs"
   },
   "engines": {
     "node": ">=20"

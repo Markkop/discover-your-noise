@@ -21,6 +21,10 @@ import {
   fetchUserPlaylistsPage,
   parsePlaylistId,
   searchSpotify,
+  clearEveryNoiseMemoryCaches,
+  clearEveryNoisePersistentCache,
+  configureEveryNoisePersistentCache,
+  getEveryNoisePersistentCacheStats,
 } from "@discover-your-noise/core";
 import {
   buildAuthorizeUrl,
@@ -144,7 +148,28 @@ function sessionIdFromRequest(c) {
   return parseCookies(c.req.header("cookie"))[COOKIE_NAME] ?? null;
 }
 
+configureEveryNoisePersistentCache({ dir: process.env.EVERY_NOISE_CACHE_DIR });
+
 app.get("/health", (c) => c.json({ ok: true }));
+
+app.get("/api/admin/everynoise-cache/stats", async (c) => {
+  const adminKey = process.env.EVERY_NOISE_CACHE_ADMIN_KEY;
+  if (!adminKey || c.req.header("x-cache-admin-key") !== adminKey) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const stats = await getEveryNoisePersistentCacheStats();
+  return c.json(stats);
+});
+
+app.post("/api/admin/everynoise-cache/clear", async (c) => {
+  const adminKey = process.env.EVERY_NOISE_CACHE_ADMIN_KEY;
+  if (!adminKey || c.req.header("x-cache-admin-key") !== adminKey) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  clearEveryNoiseMemoryCaches();
+  const disk = await clearEveryNoisePersistentCache();
+  return c.json({ memory: true, ...disk });
+});
 
 app.get("/api/me", async (c) => {
   const sessionId = sessionIdFromRequest(c);
