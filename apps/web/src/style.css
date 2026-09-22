@@ -428,6 +428,29 @@ button:disabled {
   white-space: nowrap;
 }
 
+.sort-col {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.sort-col:hover,
+.sort-col:focus-visible {
+  color: var(--text);
+}
+
+th.sortable-th.num .sort-col {
+  justify-content: flex-end;
+}
+
 .data-table tbody tr:last-child td {
   border-bottom: none;
 }

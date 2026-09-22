@@ -24,6 +24,13 @@ const LIBRARY_TABS = [
 const LIBRARY_PAGE_SIZE = 50;
 const REPORT_PAGE_SIZE = 50;
 
+const DEFAULT_REPORT_SORT = {
+  genres: { column: "total", direction: "desc" },
+  artists: { column: "artist", direction: "asc" },
+};
+
+const COVERAGE_SORT_ORDER = { direct: 0, inferred: 1, unmapped: 2 };
+
 function authUrl() {
   const returnTo = encodeURIComponent(window.location.href);
   return `${API}/api/auth/spotify?return_to=${returnTo}`;
@@ -57,6 +64,7 @@ const state = {
   recentBeforeByPage: [null],
   libraryLoading: false,
   reportPage: { genres: 0, artists: 0, tracks: 0 },
+  reportSort: structuredClone(DEFAULT_REPORT_SORT),
   selectedGenre: null,
   trackGenres: {},
   searchDebounce: null,
@@ -187,6 +195,97 @@ async function loadLibraryTab(tab = state.libraryTab) {
     state.libraryLoading = false;
     render();
   }
+}
+
+function defaultReportSortDirection(column) {
+  if (["direct", "inferred", "total", "share", "genres"].includes(column)) return "desc";
+  return "asc";
+}
+
+function onReportSort(table, column) {
+  if (!column || !(table in DEFAULT_REPORT_SORT)) return;
+  const current = state.reportSort[table];
+  if (current.column === column) {
+    current.direction = current.direction === "asc" ? "desc" : "asc";
+  } else {
+    state.reportSort[table] = {
+      column,
+      direction: defaultReportSortDirection(column),
+    };
+  }
+  if (table === "genres") state.reportPage.genres = 0;
+  if (table === "artists") state.reportPage.artists = 0;
+  render();
+  syncUrl({ history: "push" });
+}
+
+function renderSortableTh(table, column, label, { num = false } = {}) {
+  const sort = state.reportSort[table] ?? DEFAULT_REPORT_SORT[table];
+  const active = sort.column === column;
+  const arrow = active ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
+  const classNames = ["sortable-th", num ? "num" : ""].filter(Boolean).join(" ");
+  const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
+  return `<th class="${classNames}" aria-sort="${ariaSort}"><button type="button" class="sort-col" data-report-sort-table="${escapeAttr(table)}" data-report-sort-column="${escapeAttr(column)}">${escapeHtml(label)}${arrow}</button></th>`;
+}
+
+function sortedReportGenres(report) {
+  const { column, direction } = state.reportSort.genres;
+  const artistCount = report.artistCount || 1;
+  const mult = direction === "asc" ? 1 : -1;
+  return [...report.genres].sort((left, right) => {
+    let cmp = 0;
+    switch (column) {
+      case "genre":
+        cmp = left.genre.localeCompare(right.genre, undefined, { sensitivity: "base" });
+        break;
+      case "direct":
+        cmp = left.direct - right.direct;
+        break;
+      case "inferred":
+        cmp = left.inferred - right.inferred;
+        break;
+      case "total":
+        cmp = left.total - right.total;
+        break;
+      case "share":
+        cmp = left.total / artistCount - right.total / artistCount;
+        break;
+      default:
+        break;
+    }
+    if (cmp === 0 && column !== "genre") {
+      cmp = left.genre.localeCompare(right.genre, undefined, { sensitivity: "base" });
+    }
+    return cmp * mult;
+  });
+}
+
+function sortReportArtists(artists) {
+  const { column, direction } = state.reportSort.artists;
+  const mult = direction === "asc" ? 1 : -1;
+  return [...artists].sort((left, right) => {
+    const leftGenres = left.genres ?? [];
+    const rightGenres = right.genres ?? [];
+    let cmp = 0;
+    switch (column) {
+      case "artist":
+        cmp = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+        break;
+      case "coverage":
+        cmp =
+          (COVERAGE_SORT_ORDER[left.kind] ?? 3) - (COVERAGE_SORT_ORDER[right.kind] ?? 3);
+        break;
+      case "genres":
+        cmp = leftGenres.length - rightGenres.length;
+        break;
+      default:
+        break;
+    }
+    if (cmp === 0 && column !== "artist") {
+      cmp = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    }
+    return cmp * mult;
+  });
 }
 
 function paginateItems(items, page, pageSize = REPORT_PAGE_SIZE) {
@@ -767,7 +866,7 @@ function allArtists(report) {
     ...report.directArtists,
     ...report.inferredArtists,
     ...report.unmappedArtists,
-  ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  ];
 }
 
 function coverageLabel(kind) {
@@ -782,9 +881,11 @@ function renderSelectableGenre(genre) {
 }
 
 function filteredArtists(report) {
-  const artists = allArtists(report);
-  if (!state.selectedGenre) return artists;
-  return artists.filter((artist) => (artist.genres ?? []).includes(state.selectedGenre));
+  let artists = allArtists(report);
+  if (state.selectedGenre) {
+    artists = artists.filter((artist) => (artist.genres ?? []).includes(state.selectedGenre));
+  }
+  return sortReportArtists(artists);
 }
 
 function filteredTracks(report) {
@@ -815,14 +916,18 @@ function onSelectGenre(genre) {
 
 function renderGenresTable(report) {
   const page = state.reportPage.genres;
-  const { slice, total, hasPrev, hasMore, rangeStart, rangeEnd } = paginateItems(
-    report.genres,
-    page,
-  );
+  const genres = sortedReportGenres(report);
+  const { slice, total, hasPrev, hasMore, rangeStart, rangeEnd } = paginateItems(genres, page);
   return `
     <table class="data-table">
       <thead>
-        <tr><th>Genre</th><th class="num">Direct</th><th class="num">Inferred</th><th class="num">Total</th><th class="num">Share</th></tr>
+        <tr>
+          ${renderSortableTh("genres", "genre", "Genre")}
+          ${renderSortableTh("genres", "direct", "Direct", { num: true })}
+          ${renderSortableTh("genres", "inferred", "Inferred", { num: true })}
+          ${renderSortableTh("genres", "total", "Total", { num: true })}
+          ${renderSortableTh("genres", "share", "Share", { num: true })}
+        </tr>
       </thead>
       <tbody>
         ${slice
@@ -859,9 +964,9 @@ function renderArtistsTable(report) {
     <table class="data-table artists-table">
       <thead>
         <tr>
-          <th>Artist</th>
-          <th>Coverage</th>
-          <th class="num">Genres</th>
+          ${renderSortableTh("artists", "artist", "Artist")}
+          ${renderSortableTh("artists", "coverage", "Coverage")}
+          ${renderSortableTh("artists", "genres", "Genres", { num: true })}
           <th>Every Noise genres</th>
         </tr>
       </thead>
@@ -1029,6 +1134,7 @@ async function runAnalysis(label, path, body = {}, { restore = false, refresh = 
       state.reportCached = Boolean(result.cached);
       if (!restore) {
         state.reportPage = { genres: 0, artists: 0, tracks: 0 };
+        state.reportSort = structuredClone(DEFAULT_REPORT_SORT);
       }
       state.panelMode = "report";
       syncUrl({ history: "push" });
@@ -1233,7 +1339,8 @@ function bindEvents() {
     button.addEventListener("click", () => {
       const direction = button.dataset.reportPageGenres;
       const page = state.reportPage.genres;
-      if (direction === "next" && (page + 1) * REPORT_PAGE_SIZE < (state.report?.genres?.length ?? 0)) {
+      const genreTotal = state.report ? sortedReportGenres(state.report).length : 0;
+      if (direction === "next" && (page + 1) * REPORT_PAGE_SIZE < genreTotal) {
         state.reportPage.genres = page + 1;
         render();
         syncUrl({ history: "push" });
@@ -1304,6 +1411,12 @@ function bindEvents() {
       event.stopPropagation();
       onSelectGenre(button.dataset.selectGenre);
     });
+  });
+
+  document.querySelectorAll("[data-report-sort-table]").forEach((button) => {
+    button.addEventListener("click", () =>
+      onReportSort(button.dataset.reportSortTable, button.dataset.reportSortColumn),
+    );
   });
 }
 
